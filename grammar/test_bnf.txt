@@ -1,0 +1,9 @@
+E: E '+' T | E '-' T | T ;
+T: T '*' F | T '/' F | F ;
+F: number | "(" E ")" ;
+
+%token number
+
+@match number \d+
+
+
