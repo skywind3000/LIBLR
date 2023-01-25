@@ -1640,10 +1640,6 @@ class GrammarLoader (object):
                 return 14
             pass
         p = Production(head, body)
-        if precedence is None:
-            rightmost = p.rightmost_terminal()
-            if rightmost and (rightmost in self.g.precedence):
-                precedence = rightmost.name
         p.precedence = precedence
         if len(action) > 0:
             p.action = action
