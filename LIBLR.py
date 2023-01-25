@@ -614,7 +614,7 @@ class Grammar (object):
             if p.precedence is None:
                 rightmost = p.rightmost_terminal()
                 if rightmost and (rightmost in self.precedence):
-                    p.precedence = self.precedence[rightmost]
+                    p.precedence = rightmost.name
         self._dirty = False
         return 0
 
@@ -1605,12 +1605,6 @@ class GrammarLoader (object):
                 symbol = load_symbol(token.value)
                 body.append(symbol)
                 pos += 1
-            elif token.name == 'OPERATOR':
-                text = repr(token.value)
-                symbol = load_symbol(text)
-                body.append(symbol)
-                pos += 1
-                self.g.push_token(symbol)
             elif token.name == 'MACRO':
                 cmd = token.value.strip()
                 pos += 1
@@ -1621,7 +1615,7 @@ class GrammarLoader (object):
                     if prec not in self.g.precedence:
                         self.error_token(token, 'undefined precedence %s'%prec)
                         return 11
-                    precedence = self.g.precedence[prec]
+                    precedence = prec
                 elif cmd in ('%empty', '%e', '%epsilon'):
                     pos += 1
                     continue
@@ -1635,14 +1629,21 @@ class GrammarLoader (object):
             elif token.name == 'NUMBER':
                 self.error_token(token)
                 return 11
-            elif token.name == 'MISMATCH':
+            elif token.name == 'OPERATOR':
                 self.error_token(token)
                 return 12
-            else:
+            elif token.name == 'MISMATCH':
                 self.error_token(token)
                 return 13
+            else:
+                self.error_token(token)
+                return 14
             pass
         p = Production(head, body)
+        if precedence is None:
+            rightmost = p.rightmost_terminal()
+            if rightmost and (rightmost in self.g.precedence):
+                precedence = rightmost.name
         p.precedence = precedence
         if len(action) > 0:
             p.action = action
