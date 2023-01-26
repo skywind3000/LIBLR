@@ -14,6 +14,8 @@
 #   2023.01.24  skywind  LR(1) generator
 #   2023.01.25  skywind  LALR generator
 #   2023.01.25  skywind  Lexer & PDAInput
+#   2023.01.26  skywind  PDA
+#   2023.01.26  skywind  conflict solver
 #
 #======================================================================
 from __future__ import unicode_literals, print_function
@@ -32,7 +34,9 @@ from enum import Enum, IntEnum
 #----------------------------------------------------------------------
 # exports
 #----------------------------------------------------------------------
-__all__ = ['GrammarError', 'Symbol', 'Vector', 'Production', 'Grammar']
+__all__ = ['GrammarError', 'Symbol', 'Vector', 'Production', 'Grammar',
+           'Token', 'Parser', 'LRTable', 'Action', 'ActionName', 'Node',
+           'create_parser', 'create_parser_from_file']
 
 
 #----------------------------------------------------------------------
@@ -1703,7 +1707,7 @@ class GrammarLoader (object):
         head: str = ('@' + m.group(1)).strip('\r\n\t ')
         body: str = origin[m.span()[1]:].strip('\r\n\t ')
         if head in ('@ignore', '@skip'):
-            if not ctr.validate_pattern(body):
+            if not validate_pattern(body):
                 self.error_token(args[0], 'bad regex pattern: ' + repr(body))
                 return 2
             self.g.push_scanner(('ignore', body))
@@ -3412,6 +3416,145 @@ class LALRAnalyzer (object):
 
 
 #----------------------------------------------------------------------
+# conflict solver
+#----------------------------------------------------------------------
+class ConflictSolver (object):
+
+    def __init__ (self, g:Grammar, tab: LRTable):
+        self.g: Grammar = g
+        self.tab: LRTable = tab
+        self.conflicted = 0
+        self.state = -1
+
+    def error_rule (self, rule:Production, text:str):
+        anchor = self.g.anchor_get(rule)
+        if anchor is None:
+            LOG_ERROR('error: %s'%text)
+            return 0
+        LOG_ERROR('error:%s:%d: %s'%(anchor[0], anchor[1], text))
+        return 0
+
+    def warning_rule (self, rule:Production, text:str):
+        anchor = self.g.anchor_get(rule)
+        if anchor is None:
+            LOG_ERROR('warning: %s'%text)
+            return 0
+        LOG_ERROR('warning:%s:%d: %s'%(anchor[0], anchor[1], text))
+        return 0
+
+    def _conflict_type (self, action1:Action, action2:Action):
+        if action1.name == ActionName.SHIFT:
+            if action2.name == ActionName.SHIFT:
+                return 'shift/shift'
+            elif action2.name == ActionName.REDUCE:
+                return 'shift/reduce'
+        elif action1.name == ActionName.REDUCE:
+            if action2.name == ActionName.SHIFT:
+                return 'shift/reduce'
+            elif action2.name == ActionName.REDUCE:
+                return 'reduce/reduce'
+        n1 = ActionName(action1.name)
+        n2 = ActionName(action2.name)
+        return '%s/%s'%(n1.name, n2.name)
+
+    def process (self):
+        tab: LRTable = self.tab
+        self.state = -1
+        for row in tab.rows:
+            self.state += 1
+            for key in list(row.keys()):
+                cell = row[key]
+                if not cell:
+                    continue
+                if len(cell) <= 1:
+                    continue
+                self._solve_conflict(cell)
+        return 0
+
+    def _solve_conflict (self, actionset):
+        if not actionset:
+            return 0
+        if len(actionset) <= 1:
+            return 0
+        final = None
+        for action in actionset:
+            if final is None:
+                final = action
+                continue
+            final = self._compare_rule(final, action)
+        if isinstance(actionset, set):
+            actionset.clear()
+            actionset.add(final)
+        elif isinstance(actionset, list):
+            actionset.clear()
+            actionset.push(final)
+        return 0
+
+    def warning_conflict (self, action1:Action, action2:Action):
+        rule1:Production = action1.rule
+        rule2:Production = action2.rule
+        ctype:str = self._conflict_type(action1, action2)
+        text = 'conflict %d %s with'%(self.state, ctype)
+        text += ' ' + str(rule2)
+        self.warning_rule(rule1, text)
+
+    def _pick_shift (self, action1:Action, action2:Action, warning = False):
+        if action1.name == ActionName.SHIFT:
+            if warning:
+                self.warning_rule(action2.rule, 'discard rule: %s'%str(action2.rule))
+            return action1
+        elif action2.name == ActionName.SHIFT:
+            if warning:
+                self.warning_rule(action2.rule, 'discard rule: %s'%str(action1.rule))
+            return action2
+        return action1
+
+    def _pick_reduce (self, action1:Action, action2:Action, warning = False):
+        if action1.name == ActionName.REDUCE:
+            if warning:
+                self.warning_rule(action2.rule, 'discard rule: %s'%str(action2.rule))
+            return action1
+        elif action2.name == ActionName.REDUCE:
+            if warning:
+                self.warning_rule(action2.rule, 'discard rule: %s'%str(action1.rule))
+            return action2
+        return action1
+
+    def _compare_rule (self, action1:Action, action2:Action):
+        rule1:Production = action1.rule
+        rule2:Production = action2.rule
+        if rule1.precedence is None:
+            self.warning_conflict(action1, action2)
+            if rule2.precedence is None:
+                return self._pick_shift(action1, action2, True)
+            return action2
+        elif rule2.precedence is None:
+            self.warning_conflict(action1, action2)
+            return action1
+        n1 = rule1.precedence
+        n2 = rule2.precedence
+        if n1 not in self.g.precedence:
+            self.warning_rule(rule1, 'precedence %s not defined'%n1)
+            return action1
+        if n2 not in self.g.precedence:
+            self.warning_rule(rule2, 'precedence %s not defined'%n2)
+            return action1
+        p1:int = self.g.precedence[n1]
+        p2:int = self.g.precedence[n2]
+        if p1 > p2:
+            return action1
+        elif p1 < p2:
+            return action2
+        a1:str = self.g.assoc[n1]
+        a2:str = self.g.assoc[n2]
+        if a1 == 'left':
+            return self._pick_reduce(action1, action2)
+        elif a1 == 'right':
+            return self._pick_shift(action1, action2)
+        return action1
+
+
+#----------------------------------------------------------------------
 # LexerError
 #----------------------------------------------------------------------
 class LexerError (Exception):
@@ -3514,7 +3657,7 @@ class Lexer (object):
         last_line = 1
         last_column = 1
         try:
-            for token in ctoken_regex.tokenize(code, rules, '$'):
+            for token in tokenize(code, rules, '$'):
                 last_line = token.line
                 last_column = token.column
                 if isinstance(token.value, str):
@@ -3613,6 +3756,317 @@ class MatchAction (object):
             if not name.startswith('__'):
                 action[name] = func
         self._MATCH_ACTION_ = action
+
+
+#----------------------------------------------------------------------
+# LR Push Down Automata
+#----------------------------------------------------------------------
+class PDA (object):
+
+    def __init__ (self, g:Grammar, tab:LRTable):
+        self.g: Grammar = g
+        self.tab: LRTable = tab
+        self.input: PushDownInput = PushDownInput(self.g)
+        self.state_stack = []
+        self.symbol_stack = []
+        self.value_stack = []
+        self.current = None
+        self._semantic_action = None
+        self._lexer_action = None
+        self._is_accepted = False
+        self.accepted: bool = False
+        self.error = None
+        self.result = None
+        self.debug = False
+        self.filename = '<buffer>'
+
+    def install_semantic_action (self, obj):
+        self._semantic_action = obj
+        return 0
+
+    def install_lexer_action (self, obj):
+        self._lexer_action = obj
+        self.input.matcher = obj
+        return 0
+
+    def error_token (self, token:Token, *args):
+        if not token.line:
+            LOG_ERROR(*args)
+        else:
+            msg = 'error:%s:%d:'%(self.filename, token.line)
+            LOG_ERROR(msg, *args)
+        return 0
+
+    def open (self, code):
+        self.state_stack.clear()
+        self.symbol_stack.clear()
+        self.value_stack.clear()
+        self.input.open(code)
+        self.accepted: bool = False
+        self.error = None
+        self.state_stack.append(0)
+        self.symbol_stack.append(EOF)
+        self.value_stack.append(None)
+        self.current: Token = self.input.read()
+        self.result = None
+        return 0
+
+    def step (self):
+        if self.accepted:
+            return -1
+        elif self.error:
+            return -2
+        if len(self.state_stack) <= 0:
+            LOG_ERROR('PDA fatal error')
+            assert len(self.state_stack) > 0
+            return -3
+        state: int = self.state_stack[-1]
+        tab: LRTable = self.tab
+        if state not in tab:
+            LOG_ERROR('state %d does not in table')
+            assert state in tab
+            return -4
+        lookahead: Token = self.current
+        data = tab.rows[state].get(lookahead.name, None)
+        if not data:
+            self.error = 'unexpected token: %r'%lookahead
+            self.error_token(lookahead, self.error)
+            return -5
+        action: Action = list(data)[0]
+        if not action:
+            self.error = 'invalid action'
+            self.error_token(lookahead, 'invalid action:', str(action))
+            return -6
+        retval = 0
+        if action.name == ActionName.SHIFT:
+            symbol: Symbol = Symbol(lookahead.name, True)
+            newstate: int = action.target
+            self.state_stack.append(newstate)
+            self.symbol_stack.append(symbol)
+            self.value_stack.append(lookahead.value)
+            self.current = self.input.read()
+            if self.debug:
+                print('action: shift/%d'%action.target)
+            retval = 1
+        elif action.name == ActionName.REDUCE:
+            retval = self.__proceed_reduce(action.target)
+        elif action.name == ActionName.ACCEPT:
+            assert len(self.state_stack) == 2
+            self.accepted = True
+            self.result = self.value_stack[-1]
+            if self.debug:
+                print('action: accept')
+        elif action.name == ActionName.ERROR:
+            self.error = 'syntax error'
+            if hasattr(action, 'text'):
+                self.error += ': ' + getattr(action, 'text')
+            self.error_token(lookahead, self.error)
+            if self.debug:
+                print('action: error')
+            retval = -7
+        if self.debug:
+            print()
+        return retval
+
+    # stack: 0 1 2 3 4(top)
+    def __generate_args (self, size):
+        if len(self.state_stack) <= size:
+            return None
+        top = len(self.state_stack) - 1
+        args = []
+        for i in range(size + 1):
+            args.append(self.value_stack[top - size + i])
+        return args
+
+    def __execute_action (self, rule: Production, actname: str, actsize: int):
+        hr: int = 0
+        value = None
+        args = self.__generate_args(actsize)
+        if not self._semantic_action:
+            return 0, None
+        name = actname
+        if name.startswith('{') and name.endswith('}'):
+            name = name[1:-1].strip()
+        callback = self._semantic_action
+        if not hasattr(callback, name):
+            raise KeyError('action %s is not defined'%actname)
+        func = getattr(callback, name)
+        value = func(rule, args)
+        return 1, value
+
+    def __rule_eval (self, rule: Production):
+        parent: Production = rule
+        if hasattr(rule, 'parent'):
+            parent: Production = rule.parent
+        size = len(rule.body)
+        if len(self.state_stack) <= size:
+            self.error = 'stack size is not enough'
+            raise ValueError('stack size is not enough')
+        value = None
+        executed = 0
+        action_dict = rule.action and rule.action or {}
+        for pos, actions in action_dict.items():
+            if pos != size:
+                LOG_ERROR('invalid action pos: %d'%pos)
+                continue
+            for action in actions:
+                if isinstance(action, str):
+                    actname = action
+                    actsize = size
+                elif isinstance(action, tuple):
+                    actname = action[0]
+                    actsize = action[1]
+                else:
+                    LOG_ERROR('invalid action type')
+                    continue
+                hr, vv = self.__execute_action(parent, actname, actsize)
+                if hr > 0:
+                    value = vv
+                    executed += 1
+        if executed == 0:
+            args = self.__generate_args(size)
+            value = Node(rule.head, args[1:])
+        return value
+
+    def __proceed_reduce (self, target: int):
+        rule: Production = self.g.production[target]
+        size = len(rule.body)
+        value = self.__rule_eval(rule)
+        for i in range(size):
+            self.state_stack.pop()
+            self.symbol_stack.pop()
+            self.value_stack.pop()
+        assert len(self.state_stack) > 0
+        top = len(self.state_stack) - 1
+        state = self.state_stack[-1]
+        tab: LRTable = self.tab
+        if state not in tab:
+            LOG_ERROR('state %d does not in table')
+            assert state in tab
+            return -10
+        data = tab.rows[state].get(rule.head.name, None)
+        if not data:
+            self.error = 'reduction state mismatch'
+            self.error_token(self.current, self.error)
+            return -11
+        action: Action = list(data)[0]
+        if not action:
+            self.error = 'invalid action: %s'%str(action)
+            self.error_token(self.current, self.error)
+            return -12
+        if action.name != ActionName.SHIFT:
+            self.error = 'invalid action name: %s'%str(action)
+            self.error_token(self.current, self.error)
+            return -13
+        newstate = action.target
+        self.state_stack.append(newstate)
+        self.symbol_stack.append(rule.head)
+        self.value_stack.append(value)
+        if self.debug:
+            print('action: reduce/%d -> %s'%(target, rule))
+        return 0
+
+    def is_stopped (self) -> bool:
+        if self.accepted:
+            return True
+        if self.error:
+            return True
+        return False
+
+    def run (self):
+        while not self.is_stopped():
+            if self.debug:
+                self.print()
+            self.step()
+        return self.result
+
+    def print (self):
+        print('stack:', self.state_stack)
+        text = '['
+        symbols = []
+        for n in self.symbol_stack:
+            symbols.append(str(n))
+        text += (', '.join(symbols)) + ']'
+        print('symbol:', text)
+        print('lookahead:', self.current and self.current.name or None)
+        return 0
+
+
+#----------------------------------------------------------------------
+# create parser
+#----------------------------------------------------------------------
+class Parser (object):
+
+    def __init__ (self, g:Grammar, tab:LRTable):
+        self.g:Grammar = g
+        self.tab:LRTable = tab
+        self.pda:PDA = PDA(g, tab)
+        self.error = None
+
+    def __call__ (self, code, debug = False):
+        self.error = None
+        self.pda.open(code)
+        self.pda.debug = debug
+        self.pda.run()
+        if self.pda.accepted:
+            return self.pda.result
+        self.error = self.pda.error
+        return None
+
+
+#----------------------------------------------------------------------
+# create parser with grammar
+#----------------------------------------------------------------------
+def __create_with_grammar(g:Grammar, semantic_action, 
+                          lexer_action, algorithm):
+    if g is None:
+        return None
+    if algorithm.lower() in ('lr1', 'lr(1)'):
+        algorithm = 'lr1'
+    elif algorithm.lower() in ('lalr', 'lalr1', 'lalr(1)'):
+        algorithm = 'lalr'
+    else:
+        algorithm = 'lr1'
+    if algorithm == 'lr1':
+        analyzer = LR1Analyzer(g)
+    else:
+        analyzer = LALRAnalyzer(g)
+    hr = analyzer.process()
+    if hr != 0:
+        return None
+    tab:LRTable = analyzer.tab
+    cs:ConflictSolver = ConflictSolver(g, tab)
+    cs.process()
+    parser = Parser(g, tab)
+    if semantic_action:
+        parser.pda.install_semantic_action(semantic_action)
+    if lexer_action:
+        parser.pda.install_lexer_action(lexer_action)
+    return parser
+
+
+#----------------------------------------------------------------------
+# create_parser
+#----------------------------------------------------------------------
+def create_parser(grammar_bnf: str, 
+                  semantic_action = None,
+                  lexer_action = None,
+                  algorithm = 'lr1'):
+    g = load_from_string(grammar_bnf)
+    return __create_with_grammar(g, semantic_action, lexer_action, algorithm)
+
+
+#----------------------------------------------------------------------
+# create from file
+#----------------------------------------------------------------------
+def create_parser_from_file(grammar_file_name: str,
+                            semantic_action = None,
+                            lexer_action = None,
+                            algorithm = 'lr1'):
+    g = load_from_file(grammar_file_name)
+    return __create_with_grammar(g, semantic_action, lexer_action, algorithm)
+
+
 #----------------------------------------------------------------------
 # testing suit
 #----------------------------------------------------------------------
@@ -3643,6 +4097,19 @@ if __name__ == '__main__':
         pprint.pprint(la.route)
         la.tab.print()
         return 0
-    test3()
+    def test4():
+        grammar_definition = r'''
+        E: E '+' T | E '-' T | T;
+        T: T '*' F | T '/' F | F;
+        F: number | '(' E ')';
+        %token number
+        @ignore [ \t\n\n]*
+        @match number \d+
+        '''
+        parser = create_parser(grammar_definition,
+                               algorithm = 'lalr')
+        print(parser('1+2*3'))
+        return 0
+    test4()
 
 
