@@ -197,6 +197,53 @@ if_statement: 'if' condition 'then' result ;
 
 可以直接用内嵌字符串表示终结符，无需额外定义词法规则。
 
+### 终结符定义
+
+非内嵌字符串的终结符和 YACC 一样需要事先定义一下：
+
+```
+%token NUMBER 
+```
+
+然后后面用 `@match NAME pattern` 来定义正则：
+
+```
+@match NUMBER \d+
+```
+
+词法规则从上到下的顺序进行匹配，除了 `@match` 外，还可以用 `@ignore` 来规定忽略哪些东西，比如你想跳过空格时，你可以在最开头写：
+
+```
+@ignore [ \r\n\t]*
+```
+
+否则碰到空格就 unexpected character 掉了。
+
+### 语义动作
+
+语义动作用 `{name}` 的形式在文法中声明，可以位于生成式右边的任意位置：
+
+```
+start: {action1} symbol1 {action2} symbol2 {acion3} ;
+```
+
+在 create_parser 的时候，第二个参数传进去一个回调对象：
+
+```python
+callback = SemanticAction()
+parser = LIBLR.create_parser(grammar, callback)
+```
+
+当动作发生时，callback 对象内部的同名方法会被调用，格式：
+
+```python
+def my_action(rule, args): 
+```
+
+第一个参数是对应生成式，第二个参数是生成式各个符号的值，其中 args[1] 是第一个符号的值，args[2] 是第二个符号的值，同 Yacc 一样，args[0] 表示继承属性。
+
+语义动作计算好以后，使用 return 返回它的值。
+
 
 ## TODO 
 
