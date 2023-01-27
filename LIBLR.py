@@ -7,7 +7,7 @@
 #
 # History of this file:
 #
-#   2023.01.20  skywind  create this file
+#   2023.01.20  skywind  grammar definition
 #   2023.01.21  skywind  grammar analayzer
 #   2023.01.22  skywind  basic tokenizer
 #   2023.01.23  skywind  grammar loader
@@ -16,6 +16,7 @@
 #   2023.01.25  skywind  Lexer & PDAInput
 #   2023.01.26  skywind  PDA
 #   2023.01.26  skywind  conflict solver
+#   2023.01.27  skywind  better error checking
 #
 #======================================================================
 from __future__ import unicode_literals, print_function
@@ -1480,6 +1481,7 @@ class GrammarLoader (object):
         self.file_name = file_name and file_name or '<buffer>'
         hr = self._scan_grammar()
         if hr != 0:
+            print('loading failed %d'%hr)
             return None
         return self.g
 
@@ -1488,6 +1490,7 @@ class GrammarLoader (object):
         self.file_name = file_name
         hr = self._scan_grammar()
         if hr != 0:
+            print('loading failed %d'%hr)
             return None
         return self.g
 
@@ -1768,7 +1771,7 @@ class GrammarLoader (object):
 def load_from_file(filename) -> Grammar:
     loader = GrammarLoader()
     g = loader.load_from_file(filename)
-    if not g:
+    if g is None:
         sys.exit(1)
     return g
 
@@ -1779,7 +1782,7 @@ def load_from_file(filename) -> Grammar:
 def load_from_string(code) -> Grammar:
     loader = GrammarLoader()
     g = loader.load(code)
-    if not g:
+    if g is None:
         sys.exit(1)
     return g
 
@@ -1847,7 +1850,7 @@ class SymbolInfo (object):
 class GrammarAnalyzer (object):
 
     def __init__ (self, g: Grammar):
-        assert g
+        assert g is not None
         self.g = g
         self.info = {}
         self.epsilon = Symbol('')
@@ -2804,18 +2807,20 @@ class LR1Analyzer (object):
 
     def process (self):
         self.clear()
-        if 'S^' not in self.g.symbol:
-            self.g.argument()
         self.ga.process()
         error = self.ga.check_grammar()
         if error > 0:
             return 1
+        if len(self.g) == 0:
+            return 2
+        if 'S^' not in self.g.symbol:
+            self.g.argument()
         hr = self.__build_states()
         if hr != 0:
-            return 2
+            return 3
         hr = self.__build_table()
         if hr != 0:
-            return 3
+            return 4
         return 0
 
     def __len__ (self):
@@ -3151,19 +3156,21 @@ class LALRAnalyzer (object):
     def process (self):
         self.clear()
         self.la.clear()
-        if 'S^' not in self.g.symbol:
-            self.g.argument()
         self.ga.process()
         self.la.ga = self.ga
         error = self.ga.check_grammar()
         if error > 0:
             return 1
+        if len(self.g) == 0:
+            return 2
+        if 'S^' not in self.g.symbol:
+            self.g.argument()
         error = self.__LR0_build_states()
         if error > 0:
-            return 0
+            return 3
         error = self.__build_propagate_route()
         if error > 0:
-            return 0
+            return 4
         self.__build_lookahead()
         self.__build_LR1_state()
         self.tab = self.la.build_LR1_table()
@@ -4107,7 +4114,7 @@ if __name__ == '__main__':
         @match number \d+
         '''
         parser = create_parser(grammar_definition,
-                               algorithm = 'lalr')
+                               algorithm = 'lr1')
         print(parser('1+2*3'))
         return 0
     test4()
