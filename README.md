@@ -249,11 +249,11 @@ def my_action(rule, args):
 
 | 文件名 | 说明 |
 |-|-|
-| sample_1.py | Hello, World |
-| sample_2.py | 表达式语法分析树 |
-| sample_3.py | 表达式计算 |
-| sample_4.py | 二义文法演示 |
-| sample_json.py | 带注释的 json 解析 |
+| [sample_1.py](sample_1.py) | Hello, World |
+| [sample_2.py](sample_2.py) | 表达式语法分析树 |
+| [sample_3.py](sample_3.py) | 表达式计算 |
+| [sample_4.py](sample_4.py) | 二义文法演示 |
+| [sample_json.py](sample_json.py) | 带注释的 json 解析 |
 
 ## TODO 
 
