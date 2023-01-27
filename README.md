@@ -245,6 +245,15 @@ def my_action(rule, args):
 
 语义动作计算好以后，使用 return 返回它的值。之所以不像 Yacc 那样直接把 C 代码写道文法动作里，只写一个名字，再靠外部的 callback 具体实现，就是为了不和某种语言耦合太深，将来可以支持导出其它语言。
 
+## Samples
+
+| 文件名 | 说明 |
+|-|-|
+| sample_1.py | Hello, World |
+| sample_2.py | 表达式语法分析树 |
+| sample_3.py | 表达式计算 |
+| sample_4.py | 二义文法演示 |
+| sample_json.py | 带注释的 json 解析 |
 
 ## TODO 
 
