@@ -1,0 +1,48 @@
+# vim: set ts=4 sw=4 tw=0 et nocindent :
+
+# 定义两个终结符
+%token NUMBER
+%token STRING
+
+start: value                {get1}
+     ;
+
+value: object               {get1}
+     | array                {get1}
+     | STRING               {get_string}
+     | NUMBER               {get_number}
+     | 'true'               {get_true}
+     | 'false'              {get_false}
+     | 'null'               {get_null}
+     ;
+
+array: '[' array_items ']'                  {get_array}
+     ;
+
+array_items: array_items ',' value          {list_many}
+           | value                          {list_one}
+           |                                {list_empty}
+           ;
+
+object: '{' object_items '}'                {get_object}
+      ;
+
+object_items: object_items ',' item_pair    {list_many}
+            | item_pair                     {list_one}
+            |                               {list_empty}
+            ;
+
+item_pair: STRING ':' value                 {item_pair}
+         ;
+
+# 词法：忽略空白
+@ignore [ \r\n\t]*
+
+# 词法：忽略注释
+@ignore //.*
+
+# 词法：匹配 NUMBER 和 STRING
+@match NUMBER \d+(\.\d*)?
+@match STRING "(?:\\.|[^"\\])*"
+
+
