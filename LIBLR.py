@@ -1486,6 +1486,8 @@ class GrammarLoader (object):
         return self.g
 
     def load_from_file (self, file_name, encoding = None):
+        if not os.path.exists(file_name):
+            raise FileNotFoundError('No such file: %r'%file_name)
         self.source = cstring.load_file_text(file_name, encoding)
         self.file_name = file_name
         hr = self._scan_grammar()
