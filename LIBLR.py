@@ -636,6 +636,8 @@ class Grammar (object):
     # push precedence
     def push_precedence (self, symbol, prec, assoc):
         name = self._symbol_name(symbol)
+        if prec == 'precedence':
+            prec = 'left'
         self.precedence[name] = prec
         self.assoc[name] = assoc
 
@@ -1672,7 +1674,7 @@ class GrammarLoader (object):
                     self.error_token(n)
                     return 1
                 self.g.push_token(n.value)
-        elif cmd in ('%left', '%right', '%nonassoc'):
+        elif cmd in ('%left', '%right', '%nonassoc', '%precedence'):
             assoc = cmd[1:].strip()
             for n in argv:
                 if n.name not in ('NAME', 'STRING'):
