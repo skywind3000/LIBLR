@@ -14,9 +14,10 @@ class JsonAction:
 
     def get_number (self, rule, args):
         text = args[1]
-        if text.isdigit():
-            return int(text, 0)
-        return float(text)
+        v = float(text)
+        if v.is_integer():
+            return int(v)
+        return v
 
     def get_true (self, rule, args):
         return True
