@@ -17,6 +17,7 @@
 #   2023.01.26  skywind  PDA
 #   2023.01.26  skywind  conflict solver
 #   2023.01.27  skywind  better error checking
+#   2023.02.22  skywind  new print() method for Node class
 #
 #======================================================================
 from __future__ import unicode_literals, print_function
@@ -2791,6 +2792,18 @@ class Node (object):
 
     def __str__ (self):
         return self.__repr__()
+
+    def print (self, prefix = ''):
+        print(prefix, end = '')
+        print(self.name)
+        for child in self.child:
+            if isinstance(child, Node):
+                child.print(prefix + '| ')
+            elif isinstance(child, Symbol):
+                print(prefix + '| ' + str(child))
+            else:
+                print(prefix + '| ' + str(child))
+        return 0
 
 
 #----------------------------------------------------------------------
