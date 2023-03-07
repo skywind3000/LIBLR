@@ -3903,7 +3903,6 @@ class PDA (object):
         return args
 
     def __execute_action (self, rule: Production, actname: str, actsize: int):
-        hr: int = 0
         value = None
         args = self.__generate_args(actsize)
         if not self._semantic_action:
