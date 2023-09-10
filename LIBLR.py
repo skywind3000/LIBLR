@@ -524,7 +524,7 @@ class Grammar (object):
     def __copy__ (self):
         obj = Grammar()
         for p in self.production:
-            obj.push_precedence(p.__copy__())
+            obj.push_production(p.__copy__())
         for t in self.terminal:
             obj.push_token(t)
         for p in self.precedence:
@@ -536,16 +536,16 @@ class Grammar (object):
             obj.start = obj.symbol[self.start.name]
         return obj
 
-    def __deepcopy__ (self):
+    def __deepcopy__ (self, memo):
         obj = Grammar()
         for p in self.production:
-            obj.push_precedence(p.__deepcopy__())
+            obj.push_production(p.__deepcopy__(memo))
         for t in self.terminal:
             obj.push_token(t)
         for p in self.precedence:
             c = self.precedence[p]
             obj.push_precedence(p, c[0], c[1])
-        obj.srcinfo = self.srcinfo.__deepcopy__()
+        obj.srcinfo = self.srcinfo.__deepcopy__(memo)
         obj.update()
         if self.start:
             obj.start = obj.symbol[self.start.name]
@@ -759,9 +759,6 @@ class Token (object):
     def __copy__ (self):
         return Token(self.name, self.value, self.line, self.column)
 
-    def __deepcopy__ (self):
-        return self.__copy__()
-
 
 #----------------------------------------------------------------------
 # tokenize
@@ -872,11 +869,11 @@ def regex_expand(macros, pattern, guarded = True):
             output.append(pattern[pos:p3])
             pos = p3
             continue
-        elif name[0].isdigit():
+        if name[0].isdigit():
             output.append(pattern[pos:p3])
             pos = p3
             continue
-        elif ('<' in name) or ('>' in name):
+        if ('<' in name) or ('>' in name):
             raise ValueError('invalid pattern name "%s"'%name)
         if name not in macros:
             raise ValueError('{%s} is undefined'%name)
@@ -1126,7 +1123,7 @@ class cstring (object):
             return True
         if text.lower() in ('0', 'false', 'no', 'n', 'f', 'disable'):
             return False
-        x = string_to_int(text)
+        x = cstring.string_to_int(text)
         if text.isdigit() or x != 0:
             return (x != 0) and True or False
         return defval
@@ -1821,7 +1818,7 @@ class SymbolInfo (object):
         obj = SymbolInfo(self.symbol)
         return obj
 
-    def __deepcopy__ (self):
+    def __deepcopy__ (self, memo):
         return self.__copy__()
 
     @property
@@ -2460,7 +2457,7 @@ class RulePtr (object):
         obj.__hash = self.hash
         return obj
 
-    def __deepcopy__ (self):
+    def __deepcopy__ (self, memo):
         return self.__copy__()
 
     def __hash__ (self) -> int:
@@ -3960,7 +3957,7 @@ class PDA (object):
             self.symbol_stack.pop()
             self.value_stack.pop()
         assert len(self.state_stack) > 0
-        top = len(self.state_stack) - 1
+        top = len(self.state_stack) - 1  # noqa
         state = self.state_stack[-1]
         tab: LRTable = self.tab
         if state not in tab:
