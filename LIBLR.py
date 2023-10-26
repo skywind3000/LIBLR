@@ -800,12 +800,12 @@ def _tokenize(code, specs, eof = None):
         name = definition[kind]
         if name is None:
             continue
-        elif callable(name):
+        if callable(name):
             if kind not in extended:
                 obj = name(value)
             else:
                 obj = name(value, extended[kind])
-            name, value = None, None
+            name = None
             if isinstance(obj, list) or isinstance(obj, tuple):
                 if len(obj) > 0: 
                     name = obj[0]
